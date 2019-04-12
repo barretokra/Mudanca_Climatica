@@ -1,0 +1,345 @@
+---
+title: "Mudanças Climáticas"
+author: "Tarssio Brito Barreto"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: tactile
+    highlight: github
+---
+
+<div style="text-align: justify">
+
+```{r setup, include=FALSE, warning= FALSE}
+setwd("C:/Users/barreto/Desktop/Nova pasta/Pieter")
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, reshape2, sp, rgdal, raster,gtable, grid,
+               spdplyr, plotly)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introdução
+
+Este breve tutorial tem como objetivo apresentar o processo de aquisição e visualização dos dados disponibilizados pelo CPTEC/INPE e UPF, que visa o desenvolvimento de uma ferramenta para acesso aos cenários de mudanças climáticas regionalizados no Brasil [PROJETA](https://projeta.cptec.inpe.br/#/about). 
+
+O material mostrado neste documento serviu também de base para as publicações: 
+
+a) "*The impact of climate change on renewable energy in the brazilian northeast*" -> Pieter de Jong; Clemente A S Tanajura; Tarssio B Barreto; Asher Kipersok; Ednildo A Torres. Apresentado no XI Congresso Brasileiro de Planejamento Energético.
+
+b) "*The impact of climate change on hydroelectricity in Brazil*" -> Pieter de Jong;  Tarssio B Barreto; ASher Kipersok; Ednildo A Torres. Apresentado em: Advanced School on Water-Energy-Food Nexus.
+
+c) "*Estimating the Impact of Climate Change on Wind and Solar Energy in Brazil using a South American regional climate model*" -> Pieter de Jong; Clemente A S Tanajura; Tarssio B Barreto; ASher Kipersok; Ednildo A Torres; Karla Esquerre. Aprovado na revista Renewable Energy.
+
+
+## Contextualização 
+
+
+Uma das questões levantadas sobre a mudança climática diz respeito a necessidade de maior geração de energia renovável para mitigação destes impactos. Porém, estas fontes de energias também serão impactadas por estas mudanças, como a intensidade da radiação solar. 
+
+Apesar disto, há poucos estudos que examinaram o impacto das mudanças climáticas na radiação solar e não  há nenhum que realizou este estudo para a América do Sul. Esta série de artigos publicados visam contribuir, justamente, nesta lacuna do conhecimento.
+
+
+
+### Aquisição dos dados: 
+
+Os dados podem ser adquiridos no [PROJETA](https://projeta.cptec.inpe.br/#/about). Neste breve tutorial trabalharemos com dois períodos a fim de comparar duas normas climáticas, sendo a primeira entre 1960 e 1990 e a segunda entre 2070 e 2099. Utilizaremos os dados referentes a radiação solar dado o modelo HADGEM2 ES através do cenário RCP 8.5.
+
+
+Para facilitar a comunicação entre os membros que trabalharam nestas publicações, os dados foram adquiridos em xls. Porém, para inclusão no R foi mais pertinente os transformar em txt.
+
+### Carregando os dados:
+
+```{r}
+
+data_f <- read.delim("dataf.txt", sep = ";")  
+  
+
+```
+
+Com os pacotes do tidyverse iremos fazer pequenos ajustes. O primeiro deles diz respeito aos dias referentes as observações, uma breve análise no banco de dados apontou que os dados válidos estão indexados no dia 01/01. Dado isto, transformaremos nossa coluna de data para o formato DATE, retornaremos apenas o dia da observação e filtraremos as observações referentes ao dia 01.
+
+É necessário também que utilizemos a função `melt` do pacote reshape2 ou outra similar como `gather` (tidyr). Desejamos criar, enfim, um banco de dados onde as duas primeiras colunas sejam Latitude e Longitude. A seguir, temos uma coluna com o valor da intensidade da radiação solar (OCIS) e o ano da observação está na coluna 5.
+
+Este procedimento é visto em 1 (para os dados do futuro) e 2 (para os dados históricos):
+
+### 1)
+```{r}
+
+  dat_f <- data_f %>% 
+    mutate(date = lubridate::ymd(Data)) %>% 
+    mutate(day  = lubridate::day(date)) %>% 
+    filter(day == 1) %>% 
+    mutate(year = lubridate::year(date)) %>% 
+    dplyr::select(-c(day, Data, Hora, date)) %>% 
+    mutate(Latitude = as.numeric(as.character(Latitude))) %>% 
+    melt(id.vars = c("Latitude", "Longitude", "OCIS"), 
+         measure.variable = c("year")) %>% 
+    na.omit()
+
+```
+
+### 2) 
+
+```{r}
+
+data_h <- read.delim("datah.txt", sep = ";")  
+
+
+  dat_h <- data_h %>% 
+    mutate(date = lubridate::ymd(Data)) %>% 
+    mutate(day  = lubridate::day(date)) %>% 
+    filter(day == 1) %>% 
+    mutate(year = lubridate::year(date)) %>% 
+    dplyr::select(-c(day, Data, Hora,date)) %>% 
+    mutate(Latitude = as.numeric(as.character(Latitude))) %>% 
+    melt(id.vars = c("Latitude", "Longitude", "OCIS"), 
+         measure.variable = c("year")) %>% 
+    na.omit()
+
+```
+
+
+Uniremos as linhas destes bancos de dados:
+
+```{r}
+
+
+dat_final <- rbind(dat_f, dat_h)
+
+```
+
+
+### Normas Climáticas
+
+Partimos agora para encontrar as normas climáticas, através da média, nos dois intervalos de tempo que foram trabalhos nestas publicações. Uma forma de fazermos este corte é utilizando a função `cut` e determinando *breaks*, outras alternativas como o `case_when` do pacote dplyr me parecem, hoje, mais racional.
+
+```{r}
+
+ dat_a <- dat_final %>% 
+    mutate(factor = cut(value, breaks = c(-Inf, 1990, 2070, 2099), 
+                        labels = c("1", "2", "3"))) %>% 
+    filter(factor == 1) %>% 
+    group_by(Latitude, Longitude) %>% 
+    summarise(mean_1 = mean(OCIS))
+
+```
+
+
+```{r}
+
+dat_b <- dat_final %>% 
+    mutate(factor = cut(value, breaks = c(-Inf, 1990, 2070, 2099), 
+                        labels = c("1", "2", "3"))) %>% 
+    filter(factor == 3) %>% 
+    group_by(Latitude, Longitude) %>% 
+    summarise(mean_2 = mean(OCIS)) %>% 
+    ungroup() 
+```
+
+Uniremos os dois bancos de dados (`inner_join`) e criaremos uma variável que representa a variação em porcentagem da norma climática ponto a ponto.
+
+```{r}
+
+ var <- dat_a %>% 
+    inner_join(dat_b, by = c("Latitude" = "Latitude", "Longitude" = "Longitude")) %>% 
+    mutate(var = (mean_2 - mean_1)*100/ mean_1) %>% 
+    mutate(group = 0)
+
+```
+
+Chegamos ao fim com um banco de dados com cerca de 40 mil linhas, perceba que nos primeiros bancos de dados tinha cerca de 1 milhão de linhas. Este processo foi fundamental para que conseguíssemos criar uma visualização interpretável dos dados. Vamos agora a esta etapa
+
+###Visualização de Dados
+
+O primeiro passo é encontrar um shape adequado para este trabalho, a princípio, como queremos trabalhar com estados, sugiro o uso [deste](https://docs.google.com/file/d/0B__Rg9h09RtfR2FleG9sLUs2dzg/edit?pli=1).
+
+
+```{r}
+
+shape <- readOGR("regioes_2010.shp")
+
+aux   <- fortify(shape) # Transformando nosso mapa em um dataframe
+
+```
+
+O primeiro passo é criar breakpoints para determinar nossa escala de cores. Criaremos para isto um histograma da variável OCIS.
+
+```{r}
+
+p1 <- ggplot(data = var, aes(x = var)) +
+  geom_histogram(fill = "darkblue", col = "white")  + 
+  labs(x = "Variação (%)", y = "") +
+  geom_density() +
+  theme_bw()
+
+plotly::ggplotly(p1)
+
+```
+
+Optamos, depois de algumas tentativas, pelo seguinte formato: 
+
+```{r}
+
+pretty_breaks <- c(-10, -8, -6, -4, -3, -2, -1, 0,
+                   1, 2, 3, 4, 6, 8, 10, 15, 20, 30)
+
+```
+
+Para montarmos a nossa escala, vamos utilizar uma sequência de funções. Nesta sequência determinaremos os extremos, as labels e o arredondamento destas: 
+
+```{r}
+
+# Encontrando Extremos
+minVal <- round(min(var$var, na.rm = T),0)-1
+# Labels
+labels <- c()
+brks   <- c(minVal, pretty_breaks)
+# Arrendondamento
+  for(idx in 1:length(brks)){
+    labels <- c(labels,round(brks[idx + 1], 2))
+  }
+  
+  labels <- labels[1:length(labels)-1]
+  
+  var$brks <- cut(var$var, 
+                  breaks = brks, 
+                  include.lowest = TRUE, 
+                  labels = labels)
+  
+  brks_scale <- levels(var$brks)
+  labels_scale <- rev(brks_scale)
+
+```
+
+Então, agora uma breve colaboração de cores dada por Isabela Almeida: 
+
+```{r}
+
+ colb <- c("red4", "#800026","#B10026", "#E31A1C",  "#FC4E2A",  "#FD8D3C", "#FEB24C", 
+           "#FED976", "khaki1", "#FCFCBD","#F7FCF0","#B7FCE3","#CCEBC5","#A8DDB5",
+           "#7BCCC4" ,"#4EB3D3", "#2B8CBE","#0868AC","#084081")
+  
+```
+
+
+```{r}
+
+ggplot() +  
+  geom_raster(data  = var, aes(x = Longitude, y = Latitude, fill = brks)) + 
+  geom_polygon(data = aux, aes(x = long, y = lat, group = group), 
+               fill = NA, color = "black", size = 1) +
+  labs(fill = "Variation of OCIS (%)") +
+  coord_equal() +
+  theme(legend.position = "bottom") +
+  theme_bw()
+
+
+
+```
+
+
+Nos artigos em questão, trabalhamos a questão das usinas geradoras de energia solar. É de destaque, por exemplo, a cidade de Salvador, com acréscimo de 4,7%, atingindo um índice médio anual de 261 W/m².Em Pirapora, em Minas Gerais, onde este acréscimo é de 6.3%, alcançando cerca de 300 W/m². 
+
+A seguir vamos encontrar o ponto de maior acréscimo e aquele que possuí, ao final, a maior intensidade de radiação solar. Esta parte não foi de interesse da publicação, mas exploraremos mais algumas possibilidades, já que parte do que foi feito ainda não está disponível ou publicado.
+
+
+
+```{r}
+
+maximo <- max(var$var)
+
+var %>% 
+  filter(var == maximo)
+
+```
+
+Se pesquisarmos esta coordenada, chegamos a um local próximo a Manaus, mostrando o impacto que as mudanças climáticas teriam na Região Amazônica, pode-se conferir no mapa esta afirmação. 
+
+```{r}
+
+maximo <- max(var$mean_2)
+
+var %>% 
+  filter(mean_2 == maximo)
+
+```
+
+No período de 2070-2090, o local com maior intensidade de radiação solar será no Peru, próximo a cidade histórica de Machu Pichu. É interessante, então, observar qual seria, no Brasil, a localidade que assumiria este posto.
+
+Para isto, faremos um "merge" entre o banco de dados que representa nosso mapa do Brasil e o que representa os nossos dados. Desta forma, teremos um mapa que será limitado as fronteiras nacional:
+
+
+```{r}
+
+aux2 <- aux %>% 
+  mutate(lat  = round(lat, digits = 2)) %>% 
+  mutate(long = round(long, digits = 2)) %>% 
+  inner_join(var, by = c("lat" = "Latitude", "long" = "Longitude"))
+
+```
+
+Agora, repetiremos o processo para determinar o local no Brasil que terá a maior média de incidência solar no período de 2070 a 2090. 
+
+```{r}
+
+maximo <- max(aux2$mean_2)
+
+aux2 %>% 
+  filter(mean_2 == maximo)
+
+```
+
+O local que apresenta maior [OCIS](https://www.google.com.br/maps/place/14%C2%B018'00.0%22S+43%C2%B054'00.0%22W/@-14.2691352,-44.1617058,3a,75y,90t/data=!3m8!1e2!3m6!1sAF1QipMi8Fr0qe7o41APaw80dyT4iTpZJ9h-w8x9S4YM!2e10!3e12!6shttps:%2F%2Flh5.googleusercontent.com%2Fp%2FAF1QipMi8Fr0qe7o41APaw80dyT4iTpZJ9h-w8x9S4YM%3Dw152-h86-k-no!7i5312!8i2988!4m5!3m4!1s0x0:0x0!8m2!3d-14.3!4d-43.9) fica próximo a bacia do Rio São Francisco e ao município de Carinhanha. 
+
+Percebam que pela imagem indicado e pela localização temos uma zona de semiárido que já é bastante assolada pela questão do balanço hídrico que ficará ainda mais comprometido com o aumento da radiação solar.
+
+Para fechar, vamos comparar a série temporal de radiação solar antes e depois para o  município de [Salvador](http://www.sei.ba.gov.br/index.php?option=com_content&view=article&id=2265&Itemid=494). Para filtrar apenas este município usaremos o "spdplyr".
+
+
+```{r}
+
+mun_shapes <- readOGR("DPA_A_100K_2017_06_14_GCS_SIR_SEI.shp") %>% 
+  filter(MUNICIPIO == "Salvador")
+
+ssa <- fortify(mun_shapes) # Transformando nosso mapa em um dataframe
+  
+
+# Filtrando os valores referentes ao município de Salvador
+
+ssa_value <- ssa %>% 
+  mutate(lat = round(lat,digits = 1)) %>% 
+  mutate(long = round(long, digits = 1)) %>% 
+  inner_join(dat_final, by = c("lat" = "Latitude", "long" = "Longitude"))
+
+# Encontrando a média anual do OCIS para o município de Salvador
+
+ssa_hist <- ssa_value %>% 
+  group_by(value) %>% 
+  summarise(mean = mean(OCIS))
+
+# Plotting 
+
+p3 <- ssa_hist %>% mutate(factor = cut(value, breaks = c(-Inf, 1990, 2070, 2099), 
+                        labels = c("1", "2", "3"))) %>% 
+  filter(factor == 1 | factor == 3) %>% 
+  ggplot(aes(x = value, y = mean)) +
+  geom_line(aes(fill = factor)) +
+  facet_wrap(~factor, scales = "free_x", ncol = 1) +
+  theme_bw()
+
+
+ggplotly(p3)
+```
+
+
+Chegamos, então, ao fim deste breve tutorial de como adquirir e visualizar dados referentes ao PROJETA (CPTEC/INPE). Qualquer coisa, segue meu email: tarssioesa at gmail dot com
+
+Referência: 
+
+-> CPTEC/INPE.- Centro de Previsão de Tempo e Estudos Climáticos / Instituto Nacional
+de Pesquisas Espaciais. Plataforma PROJETA - Projeções de mudança do clima para a
+América do Sul regionalizadas pelo Modelo Eta, 2018. Available at:
+https://projeta.cptec.inpe.br/ Accessed on: 25/04/2018.
+
